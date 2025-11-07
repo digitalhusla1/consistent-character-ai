@@ -1,0 +1,5 @@
+{
+  "name": "Consistent Character AI",
+  "description": "Upload an image, describe your desired changes with a text prompt, and let Gemini 2.5 Flash Image generate a new, edited version for you. Create consistent character images in different scenes.",
+  "requestFramePermissions": []
+}
