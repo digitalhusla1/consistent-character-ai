@@ -30,3 +30,19 @@ export const fileToImageData = async (file: File): Promise<ImageData> => {
     mimeType: file.type,
   };
 };
+
+/**
+ * Converts a File object to a full base64 data URL.
+ */
+export const fileToDataUrl = (file: File): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => {
+      if (typeof reader.result !== 'string') {
+        return reject(new Error('FileReader did not return a string.'));
+      }
+      resolve(reader.result);
+    };
+    reader.onerror = (error) => reject(error);
+  });
