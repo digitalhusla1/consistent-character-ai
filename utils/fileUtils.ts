@@ -14,8 +14,11 @@ const toBase64 = (file: File): Promise<string> =>
       }
       // result is a data URL (e.g., "data:image/jpeg;base64,LzlqLzRBQ..."),
       // we only want the part after the comma.
-      const encoded = reader.result.split(',', 2)[1];
-      resolve(encoded);
+      const parts = reader.result.split(',');
+      if (parts.length !== 2 || !parts[1]) {
+        return reject(new Error('Malformed data URL from FileReader.'));
+      }
+      resolve(parts[1]);
     };
     reader.onerror = (error) => reject(error);
   });

@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import Header from './components/Header';
 import ImageUploader from './components/ImageUploader';
@@ -7,9 +6,14 @@ import { fileToImageData, fileToDataUrl } from './utils/fileUtils';
 import { editImage } from './services/geminiService';
 import { SparklesIcon } from './components/icons/SparklesIcon';
 import HistoryPanel from './components/HistoryPanel';
-import { HistoryItem } from './types';
+import { HistoryItem, User } from './types';
+import { ResetIcon } from './components/icons/ResetIcon';
+import { useAuth } from './hooks/useAuth';
+import { AuthPage } from './components/AuthPage';
+import AdminDashboard from './components/AdminDashboard';
+import AddCreditsModal from './components/AddCreditsModal';
 
-const HISTORY_STORAGE_KEY = 'generation-history';
+const GENERATION_COST = 1; // 1 credit per generation
 
 const aspectRatioOptions = [
     { id: 'original', label: 'Original', value: 'original' },
@@ -26,8 +30,14 @@ const promptSuggestions = [
     "Add a friendly robot companion next to them",
 ];
 
+interface MainAppProps {
+    user: User;
+    onLogout: () => void;
+    chargeForGeneration: (cost: number) => Promise<{success: boolean, message: string}>;
+    requestDeposit: (username: string, amount: number) => Promise<{success: boolean, message: string}>;
+}
 
-const App: React.FC = () => {
+const MainApp: React.FC<MainAppProps> = ({ user, onLogout, chargeForGeneration, requestDeposit }) => {
     const [originalFile, setOriginalFile] = useState<File | null>(null);
     const [originalImageUrl, setOriginalImageUrl] = useState<string | null>(null);
     const [prompt, setPrompt] = useState<string>('');
@@ -37,21 +47,31 @@ const App: React.FC = () => {
     const [error, setError] = useState<string | null>(null);
     const [history, setHistory] = useState<HistoryItem[]>([]);
     const [isCurrentGenerationSaved, setIsCurrentGenerationSaved] = useState<boolean>(false);
+    const [isAddCreditsModalOpen, setIsAddCreditsModalOpen] = useState(false);
+
+    const HISTORY_STORAGE_KEY = `generation-history-${user.username}`;
 
     useEffect(() => {
         try {
             const storedHistory = localStorage.getItem(HISTORY_STORAGE_KEY);
             if (storedHistory) {
                 setHistory(JSON.parse(storedHistory));
+            } else {
+                setHistory([]);
             }
         } catch (e) {
             console.error("Failed to load history from localStorage", e);
             localStorage.removeItem(HISTORY_STORAGE_KEY);
+            setHistory([]);
         }
-    }, []);
+    }, [HISTORY_STORAGE_KEY]);
+
+    const handleAddBalance = () => {
+        setIsAddCreditsModalOpen(true);
+    };
 
     const handleImageUpload = async (file: File | null) => {
-        setGeneratedImage(null); // Clear previous result
+        setGeneratedImage(null);
         setError(null);
         setIsCurrentGenerationSaved(false);
 
@@ -77,6 +97,12 @@ const App: React.FC = () => {
             return;
         }
 
+        const chargeResult = await chargeForGeneration(GENERATION_COST);
+        if (!chargeResult.success) {
+            setError(chargeResult.message);
+            return;
+        }
+
         setIsLoading(true);
         setError(null);
         setGeneratedImage(null);
@@ -99,6 +125,8 @@ const App: React.FC = () => {
         } catch (e) {
             const errorMessage = e instanceof Error ? e.message : "An unexpected error occurred.";
             setError(errorMessage);
+            // Note: We don't refund the credit here, as the API call was still made.
+            // A more robust system might have a refund process.
         } finally {
             setIsLoading(false);
         }
@@ -143,7 +171,7 @@ const App: React.FC = () => {
         setAspectRatio(item.aspectRatio || 'original');
         setOriginalFile(null);
         setError(null);
-        setIsCurrentGenerationSaved(true); // This item is already in history
+        setIsCurrentGenerationSaved(true);
         window.scrollTo({ top: 0, behavior: 'smooth' });
     };
     
@@ -158,107 +186,161 @@ const App: React.FC = () => {
         localStorage.removeItem(HISTORY_STORAGE_KEY);
     };
 
+    const handleReset = () => {
+        setOriginalFile(null);
+        setOriginalImageUrl(null);
+        setPrompt('');
+        setAspectRatio('original');
+        setGeneratedImage(null);
+        setIsLoading(false);
+        setError(null);
+        setIsCurrentGenerationSaved(false);
+    };
+
     const isGenerateDisabled = isLoading || !originalFile || !prompt.trim();
+    const isResetDisabled = !originalFile && !prompt.trim() && !generatedImage;
 
     return (
-        <div className="min-h-screen bg-gray-900 text-gray-100 flex flex-col items-center p-4 sm:p-6 md:p-8">
-            <Header />
-            <main className="w-full max-w-7xl grid grid-cols-1 lg:grid-cols-3 gap-8 mt-8">
-                {/* Left panel for controls */}
-                <div className="lg:col-span-1 w-full flex flex-col gap-6 bg-gray-800/50 p-6 rounded-xl border border-gray-700 h-fit">
-                    <div>
-                        <label className="block text-sm font-medium text-gray-300 mb-2">1. Upload Reference Image</label>
-                        <ImageUploader onImageUpload={handleImageUpload} previewUrl={originalImageUrl} />
-                    </div>
+        <>
+            <div className="min-h-screen bg-gray-900 text-gray-100 flex flex-col items-center p-4 sm:p-6 md:p-8">
+                <Header user={user} onLogout={onLogout} onAddBalance={handleAddBalance} />
+                <main className="w-full max-w-7xl grid grid-cols-1 lg:grid-cols-3 gap-8 mt-2">
+                    {/* Left panel for controls */}
+                    <div className="lg:col-span-1 w-full flex flex-col gap-6 bg-gray-800/50 p-6 rounded-xl border border-gray-700 h-fit">
+                        <div>
+                            <label className="block text-sm font-medium text-gray-300 mb-2">1. Upload Reference Image</label>
+                            <ImageUploader onImageUpload={handleImageUpload} previewUrl={originalImageUrl} />
+                        </div>
 
-                    <div>
-                        <label htmlFor="prompt-input" className="block text-sm font-medium text-gray-300 mb-2">2. Describe Your Edit</label>
-                        <textarea
-                            id="prompt-input"
-                            value={prompt}
-                            onChange={(e) => {
-                                setPrompt(e.target.value);
-                                setIsCurrentGenerationSaved(false);
-                            }}
-                            placeholder="e.g., Make the man stand on a beach with a sunset background"
-                            className="w-full h-32 p-3 bg-gray-900 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition"
-                            disabled={isLoading}
-                        />
-                         <div className="mt-2">
-                            <p className="text-xs text-gray-400 mb-2">Need inspiration? Try these:</p>
-                            <div className="flex flex-wrap gap-2">
-                                {promptSuggestions.map((suggestion, index) => (
+                        <div>
+                            <label htmlFor="prompt-input" className="block text-sm font-medium text-gray-300 mb-2">2. Describe Your Edit</label>
+                            <textarea
+                                id="prompt-input"
+                                value={prompt}
+                                onChange={(e) => {
+                                    setPrompt(e.target.value);
+                                    setIsCurrentGenerationSaved(false);
+                                }}
+                                placeholder="e.g., Make the man stand on a beach with a sunset background"
+                                className="w-full h-32 p-3 bg-gray-900 border border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition"
+                                disabled={isLoading}
+                            />
+                            <div className="mt-2">
+                                <p className="text-xs text-gray-400 mb-2">Need inspiration? Try these:</p>
+                                <div className="flex flex-wrap gap-2">
+                                    {promptSuggestions.map((suggestion, index) => (
+                                        <button
+                                            key={index}
+                                            onClick={() => handleSuggestionClick(suggestion)}
+                                            className="px-3 py-1 bg-gray-700 text-gray-300 rounded-full text-xs hover:bg-purple-600 hover:text-white transition-colors duration-200"
+                                        >
+                                            {suggestion}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-medium text-gray-300 mb-2">
+                                3. Select Aspect Ratio
+                            </label>
+                            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+                                {aspectRatioOptions.map((option) => (
                                     <button
-                                        key={index}
-                                        onClick={() => handleSuggestionClick(suggestion)}
-                                        className="px-3 py-1 bg-gray-700 text-gray-300 rounded-full text-xs hover:bg-purple-600 hover:text-white transition-colors duration-200"
+                                        key={option.id}
+                                        type="button"
+                                        onClick={() => {
+                                            setAspectRatio(option.value);
+                                            setIsCurrentGenerationSaved(false);
+                                        }}
+                                        className={`p-2 rounded-lg text-center text-sm transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-purple-500 ${
+                                            aspectRatio === option.value
+                                                ? 'bg-purple-600 text-white font-semibold'
+                                                : 'bg-gray-700 hover:bg-gray-600'
+                                        }`}
+                                        aria-pressed={aspectRatio === option.value}
                                     >
-                                        {suggestion}
+                                        {option.label}
                                     </button>
                                 ))}
                             </div>
                         </div>
-                    </div>
-
-                    <div>
-                        <label className="block text-sm font-medium text-gray-300 mb-2">
-                            3. Select Aspect Ratio
-                        </label>
-                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
-                            {aspectRatioOptions.map((option) => (
-                                <button
-                                    key={option.id}
-                                    type="button"
-                                    onClick={() => {
-                                        setAspectRatio(option.value);
-                                        setIsCurrentGenerationSaved(false);
-                                    }}
-                                    className={`p-2 rounded-lg text-center text-sm transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-purple-500 ${
-                                        aspectRatio === option.value
-                                            ? 'bg-purple-600 text-white font-semibold'
-                                            : 'bg-gray-700 hover:bg-gray-600'
-                                    }`}
-                                    aria-pressed={aspectRatio === option.value}
-                                >
-                                    {option.label}
-                                </button>
-                            ))}
+                        
+                        <div className="flex items-center gap-2">
+                            <button
+                                onClick={handleGenerate}
+                                disabled={isGenerateDisabled}
+                                className="flex-grow flex items-center justify-center gap-2 px-6 py-3 font-semibold text-white bg-purple-600 rounded-lg hover:bg-purple-700 disabled:bg-gray-600 disabled:cursor-not-allowed transition-all duration-200"
+                            >
+                                <SparklesIcon className="w-5 h-5" />
+                                {isLoading ? 'Generating...' : `Generate (${GENERATION_COST} Credit)`}
+                            </button>
+                            <button
+                                onClick={handleReset}
+                                disabled={isResetDisabled || isLoading}
+                                className="flex-shrink-0 p-3 font-semibold text-gray-300 bg-gray-700 rounded-lg hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-500 disabled:cursor-not-allowed transition-all duration-200"
+                                aria-label="Reset all inputs"
+                                title="Reset all inputs"
+                            >
+                                <ResetIcon className="w-5 h-5" />
+                            </button>
                         </div>
+
+                        {error && <div className="text-red-400 bg-red-900/50 border border-red-700 p-3 rounded-lg text-sm">{error}</div>}
+
+                        <HistoryPanel
+                            history={history}
+                            onSelect={handleHistorySelect}
+                            onDelete={handleHistoryDelete}
+                            onClear={handleClearHistory}
+                        />
                     </div>
 
-                    <button
-                        onClick={handleGenerate}
-                        disabled={isGenerateDisabled}
-                        className="w-full flex items-center justify-center gap-2 px-6 py-3 font-semibold text-white bg-purple-600 rounded-lg hover:bg-purple-700 disabled:bg-gray-600 disabled:cursor-not-allowed transition-all duration-200"
-                    >
-                        <SparklesIcon className="w-5 h-5" />
-                        {isLoading ? 'Generating...' : 'Generate Image'}
-                    </button>
-
-                    {error && <div className="text-red-400 bg-red-900/50 border border-red-700 p-3 rounded-lg text-sm">{error}</div>}
-
-                    <HistoryPanel
-                        history={history}
-                        onSelect={handleHistorySelect}
-                        onDelete={handleHistoryDelete}
-                        onClear={handleClearHistory}
-                    />
-                </div>
-
-                {/* Right panel for results */}
-                <div className="lg:col-span-2 w-full">
-                    <GeneratedImageDisplay
-                        originalImageUrl={originalImageUrl}
-                        generatedImageUrl={generatedImage}
-                        isLoading={isLoading}
-                        onDownload={handleDownload}
-                        onSave={handleSaveToHistory}
-                        isSaved={isCurrentGenerationSaved}
-                    />
-                </div>
-            </main>
-        </div>
+                    {/* Right panel for results */}
+                    <div className="lg:col-span-2 w-full">
+                        <GeneratedImageDisplay
+                            originalImageUrl={originalImageUrl}
+                            generatedImageUrl={generatedImage}
+                            isLoading={isLoading}
+                            onDownload={handleDownload}
+                            onSave={handleSaveToHistory}
+                            isSaved={isCurrentGenerationSaved}
+                        />
+                    </div>
+                </main>
+            </div>
+            {isAddCreditsModalOpen && (
+                <AddCreditsModal 
+                    onClose={() => setIsAddCreditsModalOpen(false)}
+                    onRequestDeposit={async (amount) => requestDeposit(user.username, amount)}
+                />
+            )}
+        </>
     );
 };
+
+const App: React.FC = () => {
+    const { 
+        currentUser,
+        login, 
+        register, 
+        logout, 
+        chargeForGeneration,
+        requestDeposit,
+        adminFunctions,
+    } = useAuth();
+    
+    if (!currentUser) {
+        return <AuthPage onLogin={login} onRegister={register} />;
+    }
+
+    if (currentUser.role === 'admin') {
+        return <AdminDashboard user={currentUser} onLogout={logout} adminFunctions={adminFunctions} />;
+    }
+
+    return <MainApp user={currentUser} onLogout={logout} chargeForGeneration={chargeForGeneration} requestDeposit={requestDeposit} />;
+};
+
 
 export default App;
