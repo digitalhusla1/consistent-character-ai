@@ -10,6 +10,7 @@ import { UnlockIcon } from './icons/UnlockIcon';
 import { ArrowUpIcon } from './icons/ArrowUpIcon';
 import { ArrowDownIcon } from './icons/ArrowDownIcon';
 import UserDetailsModal from './UserDetailsModal';
+import AdminAddCreditsModal from './AdminAddCreditsModal';
 
 type UserFilter = 'all' | 'pending' | 'approved' | 'blocked';
 type DepositFilter = 'all' | 'pending' | 'approved' | 'rejected';
@@ -60,6 +61,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, adminFu
 
     const [selectedUser, setSelectedUser] = useState<Omit<User, 'role'> | null>(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
+    const [isAdminAddCreditsModalOpen, setIsAdminAddCreditsModalOpen] = useState(false);
 
     const fetchData = useCallback(() => {
         try {
@@ -98,6 +100,11 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, adminFu
         setIsModalOpen(false);
         setSelectedUser(null);
         fetchData(); // Refresh data when closing modal
+    };
+    
+    const closeAdminAddCreditsModal = () => {
+        setIsAdminAddCreditsModalOpen(false);
+        fetchData();
     };
 
     const sortedAndFilteredUsers = useMemo(() => {
@@ -156,7 +163,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, adminFu
     return (
         <>
             <div className="min-h-screen bg-gray-900 text-gray-100 flex flex-col items-center p-4 sm:p-6 md:p-8">
-                <Header user={user} onLogout={onLogout} />
+                <Header user={user} onLogout={onLogout} onAddBalance={() => setIsAdminAddCreditsModalOpen(true)} />
                 <main className="w-full max-w-7xl mt-4">
                     <h2 className="text-2xl font-bold mb-6 text-purple-400">Admin Dashboard</h2>
                     
@@ -253,6 +260,13 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, adminFu
                     user={selectedUser} 
                     onClose={closeUserDetails} 
                     adminFunctions={adminFunctions}
+                />
+            )}
+            {isAdminAddCreditsModalOpen && (
+                <AdminAddCreditsModal
+                    onClose={closeAdminAddCreditsModal}
+                    users={allUsers}
+                    onAddCredits={adminFunctions.updateUserBalanceByAdmin}
                 />
             )}
         </>
